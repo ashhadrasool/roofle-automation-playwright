@@ -1,6 +1,11 @@
 {
   "version": 1,
   "skills": {
+    "n8n-workflow-patterns": {
+      "source": "czlonkowski/n8n-skills",
+      "sourceType": "github",
+      "computedHash": "ca96b2c12c2712365e4e95ae07d7dac464d7810cf9781de542e57ded2a88c927"
+    },
     "playwright-best-practices": {
       "source": "currents-dev/playwright-best-practices-skill",
       "sourceType": "github",
