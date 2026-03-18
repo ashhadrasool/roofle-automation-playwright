@@ -100,114 +100,126 @@ async function scrapeQuoteData(page: any) {
   });
 }
 
-async function generateQuote() {
+export interface QuoteInput {
+  address: string;
+  firstName: string;
+  lastName: string;
+  phone: string;
+  email: string;
+}
+
+export async function generateQuote(input: QuoteInput) {
+  const { address, firstName, lastName, phone, email: leadEmail } = input;
+
+  const loginEmail = process.env.ROOFLE_EMAIL!;
+  const loginPassword = process.env.ROOFLE_PASSWORD!;
+
+  const browser = await chromium.launch({ headless: process.env.HEADLESS !== 'false' });
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const page = await context.newPage();
+
+  try {
+    // Step 1: Sign in
+    await page.goto('https://app.roofle.com/signin');
+    await page.locator('#email').fill(loginEmail);
+    await page.locator('#password').click();
+    await page.locator('#password').fill(loginPassword);
+    await page.waitForTimeout(500);
+    await page.locator('button[type="submit"]').click();
+
+    // Wait for redirect to dashboard
+    await page.waitForURL('**/personal/dashboard', { timeout: 15_000 });
+    console.log('Signed in successfully');
+
+    // Step 2: Navigate to rep quotes
+    await page.goto('https://app.roofle.com/personal/rep-quotes');
+    await page.waitForLoadState('networkidle');
+    console.log('On rep-quotes page');
+
+    // Step 3: Enter address and search
+    const addressInput = page.locator('input[placeholder="Enter your street address to see your price"]');
+    await addressInput.fill(address);
+
+    // Wait for search results dropdown and select first result
+    const searchResult = page.locator('.search-result-row').first();
+    await searchResult.waitFor({ timeout: 10_000 });
+    await searchResult.click();
+    console.log('Address selected');
+
+    // Step 4: Handle "lead already exists" warning if it appears
+    const warningModal = page.locator('.ant-modal:has-text("This lead already exists")');
+    const slopeSection = page.locator('text=Review your roof and confirm its slope');
+
+    await Promise.race([
+      warningModal.waitFor({ timeout: 15_000 }).catch(() => {}),
+      slopeSection.waitFor({ timeout: 15_000 }).catch(() => {}),
+    ]);
+
+    if (await warningModal.isVisible()) {
+      console.log('Lead already exists — creating new lead anyway');
+      await warningModal.locator('button:has-text("Create new Lead")').click();
+      console.log('Clicked "Create new Lead"');
+      await warningModal.waitFor({ state: 'hidden', timeout: 10_000 });
+      await page.waitForLoadState('networkidle');
+    }
+
+    // Step 5: Scroll to and click "Create Quote" on the slope page
+    const contentContainer = page.locator('[class*="RepQuotes__Content"]');
+    await contentContainer.evaluate((el: HTMLElement) => el.scrollTo(0, el.scrollHeight));
+    await page.waitForTimeout(1000);
+
+    const createQuoteButton = page.locator('button.ant-btn-primary:has-text("Create Quote")').last();
+    await createQuoteButton.waitFor({ timeout: 15_000 });
+    await createQuoteButton.scrollIntoViewIfNeeded();
+    await page.waitForTimeout(500);
+    await createQuoteButton.click({ force: true });
+    console.log('Create Quote clicked');
+
+    // Step 6: "Almost Done!" modal appears — fill in lead details
+    await fillLeadForm(page, firstName, lastName, phone, leadEmail);
+
+    // Step 7: Wait for Quote Info section and scrape it
+    const quoteSection = page.locator('h2:has-text("Quote Info")');
+    await quoteSection.waitFor({ timeout: 30_000 });
+    await page.waitForLoadState('networkidle');
+    console.log('Quote generated');
+
+    // Scrape quote info and recommended products
+    const result = await scrapeQuoteData(page);
+
+    // Step 8: Navigate to dashboard and search for the lead by email
+    await page.goto('https://app.roofle.com/personal/dashboard');
+    await page.waitForLoadState('networkidle');
+
+    const searchInput = page.locator('input[placeholder="Search"]');
+    await searchInput.fill(leadEmail);
+    await page.waitForLoadState('networkidle');
+
+    // Wait for table results and extract the lead session ID
+    const leadRow = page.locator('tr.ant-table-row[data-row-key]').first();
+    await leadRow.waitFor({ timeout: 15_000 });
+    const leadSessionId = await leadRow.getAttribute('data-row-key');
+
+    const leadUrl = `https://app.roofle.com/personal/rep-quotes?leadSessionId=${leadSessionId}`;
+    console.log(`Lead URL: ${leadUrl}`);
+
+    return { ...result, leadUrl };
+  } finally {
+    await browser.close();
+  }
+}
+
+// CLI mode
+if (require.main === module) {
   const args = parseArgs();
+  const { address, firstName, lastName, phone, email } = args;
 
-  const address = args.address;
-  const firstName = args.firstName;
-  const lastName = args.lastName;
-  const phone = args.phone;
-  const leadEmail = args.email;
-
-  if (!address || !firstName || !lastName || !phone || !leadEmail) {
-    console.error('Usage: npm run generate-quote -- --address "429 Walnut Grove Dr, Madison, WI" --firstName John --lastName Doe --phone 5551234567 --email john@example.com');
+  if (!address || !firstName || !lastName || !phone || !email) {
+    console.error('Usage: npm run generate-quote -- --address "..." --firstName John --lastName Doe --phone 5551234567 --email john@example.com');
     process.exit(1);
   }
 
-  const email = process.env.ROOFLE_EMAIL!;
-  const password = process.env.ROOFLE_PASSWORD!;
-
-  const browser = await chromium.launch({ headless: false });
-  const page = await browser.newPage();
-
-  // Step 1: Sign in
-  await page.goto('https://app.roofle.com/signin');
-  await page.locator('#email').fill(email);
-  await page.locator('#password').click();
-  await page.locator('#password').fill(password);
-  await page.waitForTimeout(500);
-  await page.locator('button[type="submit"]').click();
-
-  // Wait for redirect to dashboard
-  await page.waitForURL('**/personal/dashboard', { timeout: 15_000 });
-  console.log('Signed in successfully');
-
-  // Step 2: Navigate to rep quotes
-  await page.goto('https://app.roofle.com/personal/rep-quotes');
-  await page.waitForLoadState('networkidle');
-  console.log('On rep-quotes page');
-
-  // Step 3: Enter address and search
-  const addressInput = page.locator('input[placeholder="Enter your street address to see your price"]');
-  await addressInput.fill(address);
-
-  // Wait for search results dropdown and select first result
-  const searchResult = page.locator('.search-result-row').first();
-  await searchResult.waitFor({ timeout: 10_000 });
-  await searchResult.click();
-  console.log('Address selected');
-
-  // Step 4: Handle "lead already exists" warning if it appears
-  const warningModal = page.locator('.ant-modal:has-text("This lead already exists")');
-  const slopeSection = page.locator('text=Review your roof and confirm its slope');
-
-  await Promise.race([
-    warningModal.waitFor({ timeout: 15_000 }).catch(() => {}),
-    slopeSection.waitFor({ timeout: 15_000 }).catch(() => {}),
-  ]);
-
-  if (await warningModal.isVisible()) {
-    console.log('Lead already exists — creating new lead anyway');
-    await warningModal.locator('button:has-text("Create new Lead")').click();
-    console.log('Clicked "Create new Lead"');
-    await warningModal.waitFor({ state: 'hidden', timeout: 10_000 });
-    await page.waitForLoadState('networkidle');
-  }
-
-  // Step 5: Scroll to and click "Create Quote" on the slope page
-  // The button is below a large map, so we need to scroll the content container
-  const contentContainer = page.locator('[class*="RepQuotes__Content"]');
-  await contentContainer.evaluate((el: HTMLElement) => el.scrollTo(0, el.scrollHeight));
-  await page.waitForTimeout(1000);
-
-  const createQuoteButton = page.locator('button.ant-btn-primary:has-text("Create Quote")').last();
-  await createQuoteButton.waitFor({ timeout: 15_000 });
-  await createQuoteButton.scrollIntoViewIfNeeded();
-  await createQuoteButton.click();
-  console.log('Create Quote clicked');
-
-  // Step 6: "Almost Done!" modal appears — fill in lead details
-  await fillLeadForm(page, firstName, lastName, phone, leadEmail);
-
-  // Step 7: Wait for Quote Info section and scrape it
-  const quoteSection = page.locator('h2:has-text("Quote Info")');
-  await quoteSection.waitFor({ timeout: 30_000 });
-  await page.waitForLoadState('networkidle');
-  console.log('Quote generated');
-
-  // Scrape quote info and recommended products
-  const result = await scrapeQuoteData(page);
-
-  // Step 8: Navigate to dashboard and search for the lead by email
-  await page.goto('https://app.roofle.com/personal/dashboard');
-  await page.waitForLoadState('networkidle');
-
-  const searchInput = page.locator('input[placeholder="Search"]');
-  await searchInput.fill(leadEmail);
-  await page.waitForLoadState('networkidle');
-
-  // Wait for table results and extract the lead session ID
-  const leadRow = page.locator('tr.ant-table-row[data-row-key]').first();
-  await leadRow.waitFor({ timeout: 15_000 });
-  const leadSessionId = await leadRow.getAttribute('data-row-key');
-
-  const leadUrl = `https://app.roofle.com/personal/rep-quotes?leadSessionId=${leadSessionId}`;
-  console.log(`Lead URL: ${leadUrl}`);
-
-  // Output the full result
-  console.log(JSON.stringify({ ...result, leadUrl }, null, 2));
-
-  await browser.close();
+  generateQuote({ address, firstName, lastName, phone, email })
+    .then((result) => console.log(JSON.stringify(result, null, 2)))
+    .catch(console.error);
 }
-
-generateQuote().catch(console.error);

@@ -1,0 +1,203 @@
+{
+  "name": "Roofle Quote Generator",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "options": {}
+      },
+      "id": "read-sheet",
+      "name": "Read Google Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [220, 0],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "filter-no-leadUrl",
+              "leftValue": "={{ $json.leadUrl }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "empty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "filter-pending",
+      "name": "Filter Rows Without leadUrl",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "set-address",
+              "name": "address",
+              "value": "={{ $json['Table_td__pf-Q9 4'] }}",
+              "type": "string"
+            },
+            {
+              "id": "set-firstName",
+              "name": "firstName",
+              "value": "={{ $json['Table_td__pf-Q9 3'].split(' ')[0] }}",
+              "type": "string"
+            },
+            {
+              "id": "set-lastName",
+              "name": "lastName",
+              "value": "={{ $json['Table_td__pf-Q9 3'].split(' ').slice(1).join(' ') }}",
+              "type": "string"
+            },
+            {
+              "id": "set-phone",
+              "name": "phone",
+              "value": "={{ $json['Table_td__pf-Q9 8'] }}",
+              "type": "string"
+            },
+            {
+              "id": "set-email",
+              "name": "email",
+              "value": "={{ $json['Table_td__pf-Q9 9'] }}",
+              "type": "string"
+            },
+            {
+              "id": "set-rowIndex",
+              "name": "rowIndex",
+              "value": "={{ $json.row_number }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "map-columns",
+      "name": "Map Columns",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [660, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:3000/generate-quote",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ address: $json.address, firstName: $json.firstName, lastName: $json.lastName, phone: $json.phone, email: $json.email }) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "call-api",
+      "name": "Generate Quote (API)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [880, 0]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "leadUrl": "={{ $json.data.leadUrl }}",
+            "quoteData": "={{ JSON.stringify($json.data) }}"
+          }
+        },
+        "options": {
+          "cellFormat": "USER_ENTERED"
+        }
+      },
+      "id": "update-sheet",
+      "name": "Update Google Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1100, 0],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [{ "node": "Read Google Sheet", "type": "main", "index": 0 }]
+      ]
+    },
+    "Read Google Sheet": {
+      "main": [
+        [{ "node": "Filter Rows Without leadUrl", "type": "main", "index": 0 }]
+      ]
+    },
+    "Filter Rows Without leadUrl": {
+      "main": [
+        [{ "node": "Map Columns", "type": "main", "index": 0 }]
+      ]
+    },
+    "Map Columns": {
+      "main": [
+        [{ "node": "Generate Quote (API)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Generate Quote (API)": {
+      "main": [
+        [{ "node": "Update Google Sheet", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
