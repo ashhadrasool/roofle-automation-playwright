@@ -1,0 +1,14 @@
+services:
+  n8n:
+    image: n8nio/n8n
+    container_name: n8n
+    restart: always
+    ports:
+      - "5678:5678"
+    volumes:
+      - ~/apps/n8n-data:/home/node/.n8n
+    environment:
+      - GENERIC_TIMEZONE=America/Chicago
+      - VERBOSE_ERRORS=false
+      - N8N_SECURE_COOKIE=false
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false

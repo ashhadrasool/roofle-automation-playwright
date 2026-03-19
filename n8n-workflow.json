@@ -101,8 +101,8 @@
               "type": "string"
             },
             {
-              "id": "set-rowIndex",
-              "name": "rowIndex",
+              "id": "set-rowNumber",
+              "name": "row_number",
               "value": "={{ $json.row_number }}",
               "type": "number"
             }
@@ -119,19 +119,26 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://localhost:3000/generate-quote",
+        "url": "http://host.docker.internal:3000/generate-quote",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ address: $json.address, firstName: $json.firstName, lastName: $json.lastName, phone: $json.phone, email: $json.email }) }}",
         "options": {
-          "timeout": 120000
+          "timeout": 120000,
+          "batching": {
+            "batch": {
+              "batchSize": 4,
+              "batchInterval": 0
+            }
+          }
         }
       },
       "id": "call-api",
       "name": "Generate Quote (API)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [880, 0]
+      "position": [880, 0],
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
@@ -149,9 +156,13 @@
         "columns": {
           "mappingMode": "defineBelow",
           "value": {
-            "leadUrl": "={{ $json.data.leadUrl }}",
-            "quoteData": "={{ JSON.stringify($json.data) }}"
-          }
+            "row_number": "={{ $('Map Columns').item.json.row_number }}",
+            "leadUrl": "={{ $json.success ? $json.data.leadUrl : '' }}",
+            "quoteData": "={{ $json.success ? JSON.stringify($json.data) : '' }}",
+            "status": "={{ $json.success ? 'done' : 'error' }}",
+            "error": "={{ $json.success ? '' : ($json.error || 'Unknown error') }}"
+          },
+          "matchingColumns": ["row_number"]
         },
         "options": {
           "cellFormat": "USER_ENTERED"

@@ -1,6 +1,8 @@
 import express from 'express';
 import dotenv from 'dotenv';
+import log from './logger';
 import { generateQuote, QuoteInput } from './generate-quote';
+import { logError, logResult, getErrors, getResults } from './db';
 
 dotenv.config();
 
@@ -40,15 +42,19 @@ app.post('/generate-quote', async (req, res) => {
     return;
   }
 
-  console.log(`[queued] ${firstName} ${lastName} at ${address} (active: ${activeJobs}/${MAX_CONCURRENT})`);
+  const input = { address, firstName, lastName, phone, email };
+  log.info(`Queued: ${firstName} ${lastName} at ${address} (active: ${activeJobs}/${MAX_CONCURRENT}, queued: ${queue.length})`);
 
   try {
     await acquireSlot();
-    console.log(`[started] ${firstName} ${lastName} at ${address}`);
-    const result = await generateQuote({ address, firstName, lastName, phone, email });
+    log.info(`Started: ${firstName} ${lastName} at ${address}`);
+    const result = await generateQuote(input);
+    log.info(`Completed: ${firstName} ${lastName} at ${address}`);
+    logResult(input, result.leadUrl, result);
     res.json({ success: true, data: result });
   } catch (err: any) {
-    console.error(`[failed] ${firstName} ${lastName}: ${err.message}`);
+    log.error(`Failed: ${firstName} ${lastName} at ${address} — ${err.message}`);
+    logError(input, err.message, err.step || 'unknown');
     res.status(500).json({ success: false, error: err.message });
   } finally {
     releaseSlot();
@@ -64,7 +70,7 @@ app.post('/generate-quotes', async (req, res) => {
     return;
   }
 
-  console.log(`[batch] Received ${jobs.length} jobs (max concurrent: ${MAX_CONCURRENT})`);
+  log.info(`Batch received: ${jobs.length} jobs (max concurrent: ${MAX_CONCURRENT})`);
 
   const results = await Promise.allSettled(
     jobs.map(async (job, index) => {
@@ -73,10 +79,18 @@ app.post('/generate-quotes', async (req, res) => {
         throw new Error(`Job ${index}: missing required fields`);
       }
 
+      const input = { address, firstName, lastName, phone, email };
       await acquireSlot();
-      console.log(`[batch ${index + 1}/${jobs.length}] Started: ${firstName} ${lastName}`);
+      log.info(`Batch [${index + 1}/${jobs.length}] Started: ${firstName} ${lastName}`);
       try {
-        return await generateQuote({ address, firstName, lastName, phone, email });
+        const result = await generateQuote(input);
+        log.info(`Batch [${index + 1}/${jobs.length}] Completed: ${firstName} ${lastName}`);
+        logResult(input, result.leadUrl, result);
+        return result;
+      } catch (err: any) {
+        log.error(`Batch [${index + 1}/${jobs.length}] Failed: ${firstName} ${lastName} — ${err.message}`);
+        logError(input, err.message, err.step || 'unknown');
+        throw err;
       } finally {
         releaseSlot();
       }
@@ -93,10 +107,19 @@ app.post('/generate-quotes', async (req, res) => {
   res.json(response);
 });
 
+// View errors and results
+app.get('/errors', (_req, res) => {
+  res.json(getErrors());
+});
+
+app.get('/results', (_req, res) => {
+  res.json(getResults());
+});
+
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', activeJobs, queueLength: queue.length, maxConcurrent: MAX_CONCURRENT });
 });
 
 app.listen(PORT, () => {
-  console.log(`Roofle automation server running on port ${PORT} (max concurrent: ${MAX_CONCURRENT})`);
+  log.info(`Server running on port ${PORT} (max concurrent: ${MAX_CONCURRENT})`);
 });
